@@ -1,2 +1,86 @@
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+
+import Consolation.Cli (Cli(..))
+import Consolation.Console (Console, input, output, lift, run, stop)
+import Consolation.Spec (runExpectedIO, ExpectedIO, stdin, stdout, expectedOutput, IOState)
+import Test.Hspec (Expectation, shouldReturn, describe, it, hspec, before_, after_)
+import qualified Control.Monad.State as ST
+import Text.Read (readEither)
+import System.Directory (removeFile)
+import qualified Control.Monad.Trans as T
+import Control.Exception (try, IOException)
+
+class SumAppender m where
+  appendSum :: Int -> m (Either IOException ())
+
+instance SumAppender IO where
+  appendSum s = try $ appendFile "sums.txt" (show s ++ "\n")
+
+instance (Monad m, SumAppender m, T.MonadTrans t) => SumAppender (t m) where
+  appendSum = T.lift . appendSum
+
+enterNumber :: (Cli m) => Console m Int
+enterNumber = output "Enter a number" $
+              input $ \s -> case readEither s of
+                  (Left err) -> output "Invalid number" enterNumber
+                  (Right i) -> return i
+
+continueOrQuit :: (Cli m) => Console m ()
+continueOrQuit = output "Continue (y) or quit (n)" $
+                 input $ \s ->
+                  case s of
+                    "y" -> return ()
+                    "n" -> output "Bye!" stop
+                    _   -> output "unrecognised option - please enter y or n" continueOrQuit
+
+enterSum :: (SumAppender m, Cli m) => Console m ()
+enterSum = do
+  x <- enterNumber
+  y <- enterNumber
+  saveSum (x + y)
+  continueOrQuit
+  enterSum
+
+saveSum :: (SumAppender m, Cli m) => Int -> Console m ()
+saveSum i = do
+  r <- lift $ appendSum i
+  case r of
+    (Left err) -> output (show err) stop
+    (Right v) -> output "Saved a sum" (return v)
+
+entryPoint :: (SumAppender m, Cli m) => Console m ()
+entryPoint = enterSum
+
+testFlow :: Console (ST.StateT IOState IO) a -> ExpectedIO -> Expectation
+testFlow console expectedIO = runExpectedIO console expectedIO `shouldReturn` (expectedOutput expectedIO)
+
+setupFile :: IO ()
+setupFile = writeFile "sums.txt" ""
+
+teardownFile :: IO ()
+teardownFile = removeFile "sums.txt"
+
 main :: IO ()
-main = putStrLn "Test suite not yet implemented"
+main = hspec $ before_ setupFile $ after_ teardownFile $ do
+  describe "facts about sum appender app" $ do
+    it "can write some sums to file" $ do
+      testFlow entryPoint $  stdout "Enter a number"
+                          ++ stdin "2"
+                          ++ stdout "Enter a number"
+                          ++ stdin "7"
+                          ++ stdout "Saved a sum"
+                          ++ stdout "Continue (y) or quit (n)"
+                          ++ stdin "y"
+                          ++ stdout "Enter a number"
+                          ++ stdin "23"
+                          ++ stdout "Enter a number"
+                          ++ stdin "dave"
+                          ++ stdout "Invalid number"
+                          ++ stdout "Enter a number"
+                          ++ stdin "25"
+                          ++ stdout "Saved a sum"
+                          ++ stdout "Continue (y) or quit (n)"
+                          ++ stdin "n"
+                          ++ stdout "Bye!"
+      lines <$> readFile "sums.txt" `shouldReturn` ["9", "48"]

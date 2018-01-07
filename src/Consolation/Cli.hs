@@ -13,6 +13,6 @@ instance Cli IO where
   putALine = putStrLn
   getALine = Just <$> getLine
 
-instance Cli m => Cli (ST.StateT s m) where
-  putALine = ST.lift . putALine
-  getALine = ST.lift getALine
+-- instance Cli m => Cli (ST.StateT s m) where
+--   putALine = ST.lift . putALine
+--   getALine = ST.lift getALine

@@ -6,9 +6,12 @@ module Consolation.Spec
 , stdin
 , stdout
 , ExpectedIO
+, expectedOutput
+, IOState
 ) where
 
 import Consolation.Cli (Cli(..))
+import Consolation.Console (Console, run)
 import Control.Monad.State (State, StateT)
 import qualified Control.Monad.State as ST
 import Data.List (partition)
@@ -17,7 +20,7 @@ data IOState = IOState [String] [String]
 
 type ExpectedIO = [(String, Bool)]
 
-instance {-# OVERLAPPING #-} Cli (State IOState) where
+instance (Monad m) => Cli (StateT IOState m) where
   putALine s = ST.modify (addToOutputs s)
               where addToOutputs s (IOState inputs outputs) = IOState inputs (outputs ++ [s])
   getALine = do
@@ -36,17 +39,21 @@ separate :: ExpectedIO -> ([String], [String])
 separate ls = (map fst is, map fst os)
   where (is, os) = partition snd ls
 
+expectedOutput :: ExpectedIO -> [String]
+expectedOutput = snd . separate
+
 stdout :: String -> ExpectedIO
 stdout s = [(s, False)]
 
 getOutputs :: IOState -> [String]
 getOutputs (IOState is os) = os
 
-runCliState :: (State IOState b) -> [String] -> [String]
-runCliState s is = getOutputs $ snd $ ST.runState s (IOState is [])
+runCliState :: (State IOState (a, b)) -> [String] -> (b, [String])
+runCliState s is = (b, getOutputs ioState)
+  where ((a, b), ioState) = ST.runState s (IOState is [])
 
-runExpectedIO :: (StateT a (State IOState) b) -> a -> ExpectedIO -> ([String], [String])
-runExpectedIO app initState io = (actualOutputs, expectedOutputs)
+runExpectedIO :: (Monad m) => Console (StateT IOState m) a -> ExpectedIO -> m [String]
+runExpectedIO app io = do
+    (a, ioState) <- ST.runStateT (run app) (IOState inputs [])
+    return $ getOutputs ioState
   where (inputs, expectedOutputs) = separate io
-        actualOutputs = runStateStack app initState inputs
-        runStateStack app a inputs = runCliState (ST.runStateT app a) inputs
