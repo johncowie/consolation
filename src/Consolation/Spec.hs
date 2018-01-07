@@ -3,6 +3,9 @@
 module Consolation.Spec
 ( runCliState
 , runExpectedIO
+, stdin
+, stdout
+, ExpectedIO
 ) where
 
 import Consolation.Cli (Cli(..))
