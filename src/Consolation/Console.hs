@@ -1,6 +1,5 @@
 module Consolation.Console (
   Console
-, lift
 , input
 , output
 , exit
@@ -11,6 +10,7 @@ where
 
 import Consolation.Cli (Cli(getALine, putALine))
 import Control.Monad (liftM2)
+import Control.Monad.Trans (MonadTrans(..))
 
 data Console m a =   Input (String -> Console m a)
                    | Output String (Console m a)
@@ -34,6 +34,9 @@ instance Cli m => Monad (Console m) where
   (>>=) (Stop) f     = exit
   (>>=) c f          = DoMonad $ liftM2 (>>=) (step c) (return f)
 
+instance MonadTrans Console where
+  lift m = DoMonad $ Return <$> m
+
 continue :: Cli m => Console m ()
 continue = return ()
 
@@ -56,6 +59,3 @@ run :: (Cli m) => Console m a -> m ()
 run (Stop) = return ()
 run (Return a) = return ()
 run c = step c >>= run
-
-lift :: (Cli m) => m a -> Console m a
-lift aM = DoMonad $ return <$> aM

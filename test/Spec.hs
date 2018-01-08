@@ -2,7 +2,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 
 import Consolation.Cli (Cli(..))
-import Consolation.Console (Console, input, output, lift, run, exit, continue)
+import Consolation.Console (Console, input, output, run, exit, continue)
 import Consolation.Spec (runExpectedIO, ExpectedIO, stdin, stdout, expectedOutput, IOState)
 import Test.Hspec (Expectation, shouldReturn, describe, it, hspec, before_, after_)
 import qualified Control.Monad.State as ST
@@ -10,6 +10,7 @@ import Text.Read (readEither)
 import System.Directory (removeFile)
 import qualified Control.Monad.Trans as T
 import Control.Exception (try, IOException)
+import Control.Monad.Fix (fix)
 
 class SumAppender m where
   appendSum :: Int -> m (Either IOException ())
@@ -28,28 +29,21 @@ enterNumber = do
     (Left err) -> output "Invalid number" >> enterNumber
     (Right i) -> return i
 
-continueOrQuit :: (Cli m) => Console m ()
-continueOrQuit = do
-  output "Continue (y) or quit (n)"
-  s <- input
-  case s of
-    "y" -> continue
-    "n" -> output "Bye!" >> exit
-    _   -> output "unrecognised option - please enter y or n" >> continueOrQuit
-
-saveSum :: (SumAppender m, Cli m) => Int -> Console m ()
-saveSum i = do
-  r <- lift $ appendSum i
-  case r of
-    (Left err) -> output (show err) >> exit
-    (Right v) -> output "Saved a sum" >> (return v)
-
 enterSum :: (SumAppender m, Cli m) => Console m ()
 enterSum = do
   x <- enterNumber
   y <- enterNumber
-  saveSum (x + y)
-  continueOrQuit
+  result <- T.lift $ appendSum (x + y)
+  case result of
+    (Left err) -> output (show err) >> exit
+    (Right v) -> output "Saved a sum" >> continue
+  output "Continue (y) or quit (n)"
+  s <- input
+  fix $ \continueOrQuit -> do
+    case s of
+      "y" -> continue
+      "n" -> output "Bye!" >> exit
+      _  -> output "unrecognised option - please enter y or n" >> continueOrQuit
   enterSum
 
 entryPoint :: (SumAppender m, Cli m) => Console m ()
