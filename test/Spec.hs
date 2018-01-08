@@ -2,7 +2,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 
 import Consolation.Cli (Cli(..))
-import Consolation.Console (Console, input, output, lift, run, stop)
+import Consolation.Console (Console, input, output, lift, run, exit, continue)
 import Consolation.Spec (runExpectedIO, ExpectedIO, stdin, stdout, expectedOutput, IOState)
 import Test.Hspec (Expectation, shouldReturn, describe, it, hspec, before_, after_)
 import qualified Control.Monad.State as ST
@@ -21,18 +21,28 @@ instance (Monad m, SumAppender m, T.MonadTrans t) => SumAppender (t m) where
   appendSum = T.lift . appendSum
 
 enterNumber :: (Cli m) => Console m Int
-enterNumber = output "Enter a number" $
-              input $ \s -> case readEither s of
-                  (Left err) -> output "Invalid number" enterNumber
-                  (Right i) -> return i
+enterNumber = do
+  output "Enter a number"
+  s <- input
+  case readEither s of
+    (Left err) -> output "Invalid number" >> enterNumber
+    (Right i) -> return i
 
 continueOrQuit :: (Cli m) => Console m ()
-continueOrQuit = output "Continue (y) or quit (n)" $
-                 input $ \s ->
-                  case s of
-                    "y" -> return ()
-                    "n" -> output "Bye!" stop
-                    _   -> output "unrecognised option - please enter y or n" continueOrQuit
+continueOrQuit = do
+  output "Continue (y) or quit (n)"
+  s <- input
+  case s of
+    "y" -> continue
+    "n" -> output "Bye!" >> exit
+    _   -> output "unrecognised option - please enter y or n" >> continueOrQuit
+
+saveSum :: (SumAppender m, Cli m) => Int -> Console m ()
+saveSum i = do
+  r <- lift $ appendSum i
+  case r of
+    (Left err) -> output (show err) >> exit
+    (Right v) -> output "Saved a sum" >> (return v)
 
 enterSum :: (SumAppender m, Cli m) => Console m ()
 enterSum = do
@@ -41,13 +51,6 @@ enterSum = do
   saveSum (x + y)
   continueOrQuit
   enterSum
-
-saveSum :: (SumAppender m, Cli m) => Int -> Console m ()
-saveSum i = do
-  r <- lift $ appendSum i
-  case r of
-    (Left err) -> output (show err) stop
-    (Right v) -> output "Saved a sum" (return v)
 
 entryPoint :: (SumAppender m, Cli m) => Console m ()
 entryPoint = enterSum
@@ -64,6 +67,8 @@ teardownFile = removeFile "sums.txt"
 main :: IO ()
 main = hspec $ before_ setupFile $ after_ teardownFile $ do
   describe "facts about sum appender app" $ do
+    it "can test an individual step" $ do
+      testFlow (output "hello") $ stdout "hello"
     it "can write some sums to file" $ do
       testFlow entryPoint $  stdout "Enter a number"
                           ++ stdin "2"

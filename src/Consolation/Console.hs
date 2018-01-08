@@ -3,7 +3,8 @@ module Consolation.Console (
 , lift
 , input
 , output
-, stop
+, exit
+, continue
 , run
 )
 where
@@ -17,37 +18,44 @@ data Console m a =   Input (String -> Console m a)
                    | Return a
                    | Stop
 
-instance (Cli m) => Functor (Console m) where
+instance Cli m => Functor (Console m) where
   fmap f (Return a) = return (f a)
-  fmap f (Stop)     = stop
-  fmap f c          = monad $ fmap f <$> continue c
+  fmap f (Stop)     = exit
+  fmap f c          = DoMonad $ fmap f <$> step c
 
-instance (Cli m) => Applicative (Console m) where
+instance Cli m => Applicative (Console m) where
   (<*>) (Return f) a = f <$> a
-  (<*>) (Stop) a     = stop
-  (<*>) c a          = monad $ liftM2 (<*>) (continue c) (return a)
+  (<*>) (Stop) a     = exit
+  (<*>) c a          = DoMonad $ liftM2 (<*>) (step c) (return a)
   pure               = Return
 
-instance (Cli m) => Monad (Console m) where
+instance Cli m => Monad (Console m) where
   (>>=) (Return a) f = f a
-  (>>=) (Stop) f     = stop
-  (>>=) c f          = monad $ liftM2 (>>=) (continue c) (return f)
+  (>>=) (Stop) f     = exit
+  (>>=) c f          = DoMonad $ liftM2 (>>=) (step c) (return f)
 
-output = Output
-input = Input
-stop = Stop
-monad = DoMonad
+continue :: Cli m => Console m ()
+continue = return ()
 
-continue :: (Cli m) => Console m a -> m (Console m a)
-continue (Input f) = maybe stop f <$> getALine
-continue (Output s c) = putALine s >> return c
-continue (DoMonad m) = m
-continue x = return x
+output :: Cli m => String -> Console m ()
+output s = Output s (return ())
+
+input :: Cli m => Console m String
+input = Input return
+
+exit :: Cli m => Console m a
+exit = Stop
+
+step :: (Cli m) => Console m a -> m (Console m a)
+step (Input f) = maybe exit f <$> getALine
+step (Output s c) = putALine s >> return c
+step (DoMonad m) = m
+step x = return x
 
 run :: (Cli m) => Console m a -> m ()
 run (Stop) = return ()
 run (Return a) = return ()
-run c = continue c >>= run
+run c = step c >>= run
 
 lift :: (Cli m) => m a -> Console m a
-lift aM = monad $ return <$> aM
+lift aM = DoMonad $ return <$> aM
